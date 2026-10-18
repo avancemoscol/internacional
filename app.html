@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Avancemos Internacional · Mi red</title>
+  <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+  <header class="barra">
+    <div class="barra-in">
+      <a class="marca" href="app.html"><img src="icono.svg" alt=""><span>avancemos<small>Internacional</small></span></a>
+      <span class="esp"></span>
+      <span class="usuario" id="usuario"></span>
+      <a class="btn ambar peq" id="ir-admin" href="admin.html" hidden>Panel de coordinación</a>
+      <button class="btn-icono" id="salir" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist" hidden>
+      <button data-v="inicio" aria-selected="true">Inicio</button>
+      <button data-v="tablero">Tablero <span class="badge" id="n-leer" hidden></span></button>
+      <button data-v="votaciones">Votaciones <span class="badge" id="n-votar" hidden></span></button>
+      <button data-v="organigrama">Organigrama y mapa</button>
+      <button data-v="perfil">Mi perfil</button>
+    </nav>
+  </header>
+  <main id="vista"><p class="vacio">Cargando…</p></main>
+
+<script type="module">
+import { sb, h, $, vaciar, aviso, errMsg, fecha, sesion, salir, selectorPais, nombrePais, textoRico, TIPOS_PUB, paises } from "./js/comun.js";
+import { tarjeta as tarjetaVoto, abierta } from "./js/votacion.js";
+import { arbol, mapa, resumenContinentes } from "./js/org.js";
+
+const s = await sesion();
+const V = $("#vista");
+$("#salir").onclick = salir;
+$("#usuario").textContent = s.miembro?.nombre || s.user.email;
+
+// ---------- Sin membresía o pendiente ----------
+if (!s.miembro && !s.rol) {
+  const f = h("form", { class: "tarjeta", style: "max-width:560px;margin:0 auto" },
+    h("h2", {}, "Únete a la red internacional"),
+    h("p", { class: "ayuda" }, "Tu cuenta de Avancemos ya existe. Completa estos datos para sumarte a la red de colombianos en el exterior."),
+    h("label", { for: "u-n" }, "Nombre completo"), h("input", { id: "u-n", required: true, minlength: 2, maxlength: 120 }),
+    h("div", { class: "fila" },
+      h("div", {}, h("label", { for: "u-p" }, "País"), h("select", { id: "u-p", required: true })),
+      h("div", {}, h("label", { for: "u-c" }, "Ciudad"), h("input", { id: "u-c", maxlength: 80 }))),
+    h("div", { class: "fila" },
+      h("div", {}, h("label", { for: "u-t" }, "WhatsApp"), h("input", { id: "u-t", type: "tel", maxlength: 30 })),
+      h("div", {}, h("label", { for: "u-s" }, "Sector en que apoyas"), h("input", { id: "u-s", maxlength: 80 }))),
+    h("div", { class: "acciones" }, h("button", { class: "btn" }, "Enviar solicitud")));
+  vaciar(V, f);
+  selectorPais($("#u-p"));
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const { error } = await sb.rpc("int_unirme", { p_nombre: $("#u-n").value, p_pais: $("#u-p").value, p_ciudad: $("#u-c").value, p_telefono: $("#u-t").value, p_sector: $("#u-s").value });
+    if (error) return aviso(errMsg(error), "error");
+    location.reload();
+  };
+} else if (!s.rol) {
+  vaciar(V, h("div", { class: "tarjeta", style: "max-width:560px;margin:0 auto;text-align:center" },
+    h("h2", {}, s.miembro.estado === "suspendido" ? "Cuenta suspendida" : "Solicitud en revisión ⏳"),
+    h("p", {}, s.miembro.estado === "suspendido"
+      ? "Tu acceso a la red internacional está suspendido. Escríbele a tu coordinador."
+      : `Hola, ${s.miembro.nombre}. Un coordinador debe aprobar tu ingreso. Cuando lo haga, aquí verás el tablero, las votaciones y el organigrama.`)));
+} else {
+  iniciar();
+}
+
+async function iniciar() {
+  $("#tabs").hidden = false;
+  if (["coordinador", "admin"].includes(s.rol)) $("#ir-admin").hidden = false;
+  const vistas = { inicio, tablero, votaciones, organigrama, perfil };
+  const ir = (v) => {
+    document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.v === v));
+    history.replaceState(null, "", "#" + v);
+    vistas[v]();
+  };
+  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => ir(b.dataset.v));
+  ir(vistas[location.hash.slice(1)] ? location.hash.slice(1) : "inicio");
+  contadores();
+}
+
+async function contadores() {
+  const { data } = await sb.rpc("int_pendientes");
+  for (const [id, n] of [["#n-leer", data?.por_leer], ["#n-votar", data?.por_votar]]) { $(id).hidden = !n; $(id).textContent = n || ""; }
+  return data;
+}
+
+// ---------- Datos ----------
+async function cargarPubs() {
+  const [{ data: pubs }, { data: leidas }] = await Promise.all([
+    sb.from("int_publicaciones").select("*").order("fijado", { ascending: false }).order("created_at", { ascending: false }).limit(200),
+    sb.from("int_lecturas").select("publicacion_id").eq("user_id", s.user.id)
+  ]);
+  const L = new Set((leidas || []).map(x => x.publicacion_id));
+  return (pubs || []).map(p => ({ ...p, leida: L.has(p.id) }));
+}
+async function cargarEnc() {
+  const [{ data: enc }, { data: votos }] = await Promise.all([
+    sb.from("int_encuestas").select("*").order("created_at", { ascending: false }).limit(100),
+    sb.from("int_votos").select("encuesta_id, opciones").eq("user_id", s.user.id)
+  ]);
+  const M = Object.fromEntries((votos || []).map(v => [v.encuesta_id, v]));
+  return { enc: enc || [], M };
+}
+
+function tarjetaPub(p, alLeer) {
+  const btn = p.leida ? h("span", { class: "chip verde" }, "✔ Leído")
+    : h("button", { class: "btn peq", onclick: async () => {
+        const { error } = await sb.from("int_lecturas").insert({ publicacion_id: p.id, user_id: s.user.id });
+        if (error && error.code !== "23505") return aviso(errMsg(error), "error");
+        p.leida = true; alLeer && alLeer(); contadores();
+      } }, "Marcar como leído");
+  return h("article", { class: "tarjeta" + (p.fijado ? " fijada" : "") },
+    h("div", { class: "meta" },
+      p.fijado ? h("span", { class: "chip ambar" }, "📌 Fijado") : null,
+      h("span", { class: "chip" }, TIPOS_PUB[p.tipo]),
+      !p.leida ? h("span", { class: "chip rojo" }, "Nuevo") : null,
+      h("span", {}, fecha(p.created_at)),
+      p.vence_en ? h("span", {}, "Fecha límite: " + fecha(p.vence_en)) : null),
+    h("h3", { style: "margin-top:10px" }, p.titulo),
+    textoRico(p.cuerpo),
+    p.enlace ? h("p", {}, h("a", { href: p.enlace, target: "_blank", rel: "noopener noreferrer" }, "Abrir enlace ↗")) : null,
+    h("div", { class: "acciones" }, btn));
+}
+
+// ---------- Vistas ----------
+async function inicio() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const [pubs, { enc, M }, pend] = await Promise.all([cargarPubs(), cargarEnc(), contadores()]);
+  const noLeidas = pubs.filter(p => !p.leida), porVotar = enc.filter(e => abierta(e) && !M[e.id]);
+  vaciar(V,
+    h("h1", {}, `Hola, ${s.miembro?.nombre?.split(" ")[0] || ""} 👋`),
+    h("div", { class: "stats" },
+      h("div", { class: "stat" }, h("b", {}, pend?.por_leer ?? 0), h("span", {}, "por leer en el tablero")),
+      h("div", { class: "stat" }, h("b", {}, pend?.por_votar ?? 0), h("span", {}, "votaciones pendientes")),
+      h("div", { class: "stat" }, h("b", {}, await nombrePais(s.miembro?.pais_id) || "—"), h("span", {}, s.miembro?.ciudad || "tu país"))),
+    porVotar.length ? [h("h2", {}, "🗳️ Te falta votar")] : null,
+    h("div", { class: "grid grid-2" }, porVotar.slice(0, 4).map(e => tarjetaVoto(e, null, { alVotar: inicio }))),
+    h("h2", { style: "margin-top:28px" }, noLeidas.length ? "📌 Lo que no has leído" : "✅ Estás al día"),
+    noLeidas.length ? h("div", { class: "grid" }, noLeidas.slice(0, 10).map(p => tarjetaPub(p, inicio)))
+      : h("p", { class: "ayuda" }, "Leíste todo lo del tablero. Las nuevas publicaciones aparecerán aquí."));
+}
+
+async function tablero() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const pubs = await cargarPubs();
+  let filtro = "todos";
+  const lista = h("div", { class: "grid" });
+  const pintar = () => {
+    const xs = pubs.filter(p => filtro === "todos" || (filtro === "noleidos" ? !p.leida : p.tipo === filtro));
+    vaciar(lista, xs.length ? xs.map(p => tarjetaPub(p, pintar)) : h("p", { class: "vacio" }, "No hay publicaciones aquí."));
+  };
+  const sel = h("select", { style: "width:auto", onchange: (e) => { filtro = e.target.value; pintar(); } },
+    h("option", { value: "todos" }, "Todo"), h("option", { value: "noleidos" }, "No leídos"),
+    Object.entries(TIPOS_PUB).map(([k, v]) => h("option", { value: k }, v)));
+  vaciar(V, h("div", { class: "seccion-cab" }, h("h2", {}, "Tablero"), sel), lista);
+  pintar();
+}
+
+async function votaciones() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const { enc, M } = await cargarEnc();
+  const ab = enc.filter(abierta), ce = enc.filter(e => !abierta(e));
+  vaciar(V,
+    h("h2", {}, "Votaciones abiertas"),
+    ab.length ? h("div", { class: "grid grid-2" }, ab.map(e => tarjetaVoto(e, M[e.id], { alVotar: () => { votaciones(); contadores(); } })))
+      : h("p", { class: "vacio" }, "No hay votaciones abiertas en este momento."),
+    ce.length ? [h("h2", { style: "margin-top:28px" }, "Cerradas"), h("div", { class: "grid grid-2" }, ce.map(e => tarjetaVoto(e, M[e.id])))] : null);
+}
+
+async function organigrama() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const { data: info, error } = await sb.rpc("int_organigrama");
+  if (error || !info) return vaciar(V, h("p", { class: "vacio" }, "No se pudo cargar el organigrama."));
+  const cMapa = h("div"), cRes = h("div"), cArbol = h("div"), detalle = h("div");
+  vaciar(V, h("h2", {}, "Mapa de la red"), h("p", { class: "ayuda" }, "Toca un país para ver quién coordina allí."),
+    cMapa, detalle, h("h2", { style: "margin-top:28px" }, "Por continente"), cRes,
+    h("h2", { style: "margin-top:28px" }, "Organigrama"), cArbol);
+  mapa(cMapa, info, { alPais: (p) => {
+    const cs = info.cargos.filter(c => c.pais_id === p.id || (c.nivel === "continente" && c.continente === p.c));
+    vaciar(detalle, h("div", { class: "tarjeta", style: "margin-top:12px" },
+      h("h3", {}, p.n), h("p", { class: "ayuda" }, `${info.por_pais[p.id] || 0} miembros activos · ${p.c}`),
+      cs.length ? cs.map(c => h("p", {}, h("b", {}, c.titulo + ": "), c.nombre || "Vacante")) : h("p", { class: "ayuda" }, "Aún no hay coordinador en este país.")));
+  } });
+  resumenContinentes(cRes, info);
+  arbol(cArbol, info.cargos);
+}
+
+async function perfil() {
+  const m = s.miembro;
+  if (!m) return vaciar(V, h("div", { class: "tarjeta" }, h("h2", {}, "Administrador nacional"), h("p", {}, "Tienes acceso completo como administrador nacional de Avancemos.")));
+  vaciar(V, h("div", { class: "tarjeta", style: "max-width:560px" },
+    h("h2", {}, m.nombre),
+    h("p", {}, h("span", { class: "chip verde" }, m.rol === "miembro" ? "Miembro" : m.rol === "coordinador" ? "Coordinador" : "Administrador internacional")),
+    h("p", {}, "📍 ", [m.ciudad, await nombrePais(m.pais_id)].filter(Boolean).join(", ")),
+    m.sector ? h("p", {}, "🧩 ", m.sector) : null,
+    m.telefono ? h("p", {}, "📱 ", m.telefono) : null,
+    h("p", {}, "✉️ ", s.user.email),
+    h("p", { class: "ayuda" }, "Para cambiar tus datos o tu país, escríbele a tu coordinador."),
+    h("div", { class: "acciones" }, h("button", { class: "btn sec", onclick: salir }, "Cerrar sesión"))));
+}
+</script>
+</body>
+</html>

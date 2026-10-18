@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Avancemos Internacional · Coordinación</title>
+  <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+  <header class="barra">
+    <div class="barra-in">
+      <a class="marca" href="admin.html"><img src="icono.svg" alt=""><span>avancemos<small>Coordinación internacional</small></span></a>
+      <span class="esp"></span>
+      <span class="usuario" id="usuario"></span>
+      <a class="btn sec peq" style="color:#fff;border-color:rgba(255,255,255,.3)" href="app.html">Vista de miembro</a>
+      <button class="btn-icono" id="salir" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button data-v="resumen" aria-selected="true">Resumen</button>
+      <button data-v="miembros">Miembros <span class="badge" id="n-pend" hidden></span></button>
+      <button data-v="tablero">Tablero</button>
+      <button data-v="votaciones">Votaciones</button>
+      <button data-v="organigrama">Organigrama</button>
+    </nav>
+  </header>
+  <main id="vista"><p class="vacio">Cargando…</p></main>
+
+<script type="module">
+import { sb, h, $, vaciar, aviso, errMsg, fecha, sesion, salir, paises, modal, CONTINENTES, NIVELES, TIPOS_PUB, textoRico } from "./js/comun.js";
+import { tarjeta as tarjetaVoto, abierta } from "./js/votacion.js";
+import { arbol, mapa, resumenContinentes } from "./js/org.js";
+
+const s = await sesion();
+if (!["coordinador", "admin"].includes(s.rol)) location.replace("app.html");
+const ES_ADMIN = s.rol === "admin";
+const V = $("#vista");
+const PS = await paises();
+const nPais = (id) => PS.find(p => p.id === id)?.n || "";
+$("#salir").onclick = salir;
+$("#usuario").textContent = (s.miembro?.nombre || s.user.email) + (ES_ADMIN ? " · Admin" : " · Coordinador");
+
+const vistas = { resumen, miembros, tablero, votaciones, organigrama };
+const ir = (v) => {
+  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.v === v));
+  history.replaceState(null, "", "#" + v); vistas[v]();
+};
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => ir(b.dataset.v));
+ir(vistas[location.hash.slice(1)] ? location.hash.slice(1) : "resumen");
+pendientes();
+
+async function pendientes() {
+  const { count } = await sb.from("int_miembros").select("user_id", { count: "exact", head: true }).eq("estado", "pendiente");
+  $("#n-pend").hidden = !count; $("#n-pend").textContent = count || "";
+}
+
+// Selectores de audiencia (todos / continente / país)
+function audiencia(cont, pais) {
+  const sc = h("select", {}, h("option", { value: "" }, "Todos los continentes"), CONTINENTES.map(c => h("option", { value: c, selected: c === cont }, c)));
+  const sp = h("select", {}, h("option", { value: "" }, "Todos los países"));
+  const llenar = () => vaciar(sp, h("option", { value: "" }, "Todos los países"),
+    PS.filter(p => !sc.value || p.c === sc.value).map(p => h("option", { value: p.id, selected: p.id === pais }, p.n)));
+  sc.onchange = llenar; llenar();
+  return { el: h("div", { class: "fila" }, h("div", {}, h("label", {}, "Continente"), sc), h("div", {}, h("label", {}, "País"), sp)),
+    val: () => ({ continente: sc.value || null, pais_id: sp.value || null }) };
+}
+const aLocal = (iso) => iso ? new Date(new Date(iso).getTime() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 16) : "";
+const aISO = (v) => v ? new Date(v).toISOString() : null;
+const copiar = async (txt) => { try { await navigator.clipboard.writeText(txt); aviso("Copiado. Pégalo en el grupo de WhatsApp."); } catch { aviso("No se pudo copiar.", "error"); } };
+const URL_APP = new URL("app.html", location.href).href;
+
+// =============== Resumen ===============
+async function resumen() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const [{ data: info }, { count: nPend }, { count: nAct }, { data: enc }, { count: nPubs }] = await Promise.all([
+    sb.rpc("int_organigrama"),
+    sb.from("int_miembros").select("user_id", { count: "exact", head: true }).eq("estado", "pendiente"),
+    sb.from("int_miembros").select("user_id", { count: "exact", head: true }).eq("estado", "activo"),
+    sb.from("int_encuestas").select("id, cerrada, cierra_en"),
+    sb.from("int_publicaciones").select("id", { count: "exact", head: true })
+  ]);
+  const cMapa = h("div"), cRes = h("div");
+  vaciar(V,
+    h("div", { class: "stats" },
+      h("div", { class: "stat" }, h("b", {}, nAct ?? 0), h("span", {}, "miembros activos")),
+      h("div", { class: "stat" }, h("b", {}, nPend ?? 0), h("span", {}, "solicitudes por aprobar")),
+      h("div", { class: "stat" }, h("b", {}, Object.keys(info?.por_pais || {}).length), h("span", {}, "países con miembros")),
+      h("div", { class: "stat" }, h("b", {}, (enc || []).filter(abierta).length), h("span", {}, "votaciones abiertas")),
+      h("div", { class: "stat" }, h("b", {}, nPubs ?? 0), h("span", {}, "publicaciones en el tablero"))),
+    h("div", { class: "acciones", style: "margin-bottom:20px" },
+      h("button", { class: "btn", onclick: () => editarPub() }, "➕ Publicar en el tablero"),
+      h("button", { class: "btn ambar", onclick: () => editarEnc() }, "🗳️ Nueva votación"),
+      h("button", { class: "btn sec", onclick: () => copiar(`🌎 Avancemos Internacional\nRegístrate aquí para ver anuncios, acuerdos y votar:\n${new URL("index.html#registro", location.href).href}`) }, "📋 Copiar enlace de registro")),
+    h("h2", {}, "Mapa"), cMapa, h("h2", { style: "margin-top:24px" }, "Por continente"), cRes);
+  if (info) { mapa(cMapa, info); resumenContinentes(cRes, info); }
+}
+
+// =============== Miembros ===============
+async function miembros() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const { data, error } = await sb.from("int_miembros").select("*").order("estado").order("created_at", { ascending: false });
+  if (error) return vaciar(V, h("p", { class: "vacio" }, errMsg(error)));
+  let fEstado = "todos", fTexto = "", fCont = "";
+  const cuerpo = h("tbody");
+  const pintar = () => {
+    const xs = data.filter(m => (fEstado === "todos" || m.estado === fEstado)
+      && (!fCont || PS.find(p => p.id === m.pais_id)?.c === fCont)
+      && (!fTexto || (m.nombre + " " + nPais(m.pais_id) + " " + (m.ciudad || "") + " " + (m.sector || "")).toLowerCase().includes(fTexto)));
+    vaciar(cuerpo, xs.length ? xs.map(fila) : h("tr", {}, h("td", { colspan: 6, class: "vacio" }, "Sin resultados")));
+  };
+  const cambiar = async (m, cambios) => {
+    const { error } = await sb.from("int_miembros").update({ ...cambios, revisado_por: s.user.id }).eq("user_id", m.user_id);
+    if (error) return aviso(errMsg(error), "error");
+    Object.assign(m, cambios); pintar(); pendientes(); aviso("Guardado.");
+  };
+  const fila = (m) => h("tr", {},
+    h("td", {}, h("b", {}, m.nombre), h("div", { class: "ayuda" }, fecha(m.created_at, false))),
+    h("td", {}, nPais(m.pais_id), m.ciudad ? h("div", { class: "ayuda" }, m.ciudad) : null),
+    h("td", {}, m.sector || "—"),
+    h("td", {}, m.telefono ? h("a", { href: "https://wa.me/" + m.telefono.replace(/\D/g, ""), target: "_blank", rel: "noopener" }, m.telefono) : "—"),
+    h("td", {}, h("span", { class: "chip " + ({ activo: "verde", pendiente: "ambar", suspendido: "rojo" })[m.estado] }, m.estado),
+      ES_ADMIN ? h("select", { style: "margin-top:6px;padding:6px", onchange: (e) => cambiar(m, { rol: e.target.value }) },
+        ["miembro", "coordinador", "admin"].map(r => h("option", { value: r, selected: m.rol === r }, r))) : h("div", { class: "ayuda" }, m.rol)),
+    h("td", {}, h("div", { class: "acciones", style: "margin:0" },
+      m.estado !== "activo" ? h("button", { class: "btn peq", onclick: () => cambiar(m, { estado: "activo" }) }, "Aprobar") : null,
+      m.estado !== "suspendido" && m.user_id !== s.user.id ? h("button", { class: "btn sec peq", onclick: () => cambiar(m, { estado: "suspendido" }) }, m.estado === "pendiente" ? "Rechazar" : "Suspender") : null,
+      ES_ADMIN && m.user_id !== s.user.id ? h("button", { class: "btn-icono", title: "Eliminar", onclick: async () => {
+        if (!confirm(`¿Eliminar a ${m.nombre} de la red internacional?`)) return;
+        const { error } = await sb.from("int_miembros").delete().eq("user_id", m.user_id);
+        if (error) return aviso(errMsg(error), "error");
+        data.splice(data.indexOf(m), 1); pintar();
+      } }, "🗑") : null)));
+  vaciar(V,
+    h("div", { class: "seccion-cab" }, h("h2", {}, `Miembros (${data.length})`),
+      h("button", { class: "btn sec peq", onclick: () => {
+        const csv = [["nombre", "pais", "ciudad", "sector", "telefono", "rol", "estado"], ...data.map(m => [m.nombre, nPais(m.pais_id), m.ciudad, m.sector, m.telefono, m.rol, m.estado])]
+          .map(r => r.map(x => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+        const a = h("a", { href: URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" })), download: "miembros_internacional.csv" }); a.click();
+      } }, "⬇ Exportar CSV")),
+    h("div", { class: "fila", style: "margin-bottom:12px" },
+      h("input", { placeholder: "Buscar por nombre, país, ciudad o sector", oninput: (e) => { fTexto = e.target.value.toLowerCase(); pintar(); } }),
+      h("select", { onchange: (e) => { fEstado = e.target.value; pintar(); } }, ["todos", "pendiente", "activo", "suspendido"].map(x => h("option", { value: x, selected: x === "todos" }, x === "todos" ? "Todos los estados" : x))),
+      h("select", { onchange: (e) => { fCont = e.target.value; pintar(); } }, h("option", { value: "" }, "Todos los continentes"), CONTINENTES.map(c => h("option", { value: c }, c)))),
+    h("div", { class: "tarjeta tabla-caja" }, h("table", { class: "tabla" },
+      h("thead", {}, h("tr", {}, ["Nombre", "Ubicación", "Sector", "WhatsApp", "Estado / rol", "Acciones"].map(x => h("th", {}, x)))), cuerpo)));
+  pintar();
+}
+
+// =============== Tablero ===============
+async function tablero() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const { data } = await sb.from("int_publicaciones").select("*").order("fijado", { ascending: false }).order("created_at", { ascending: false });
+  vaciar(V, h("div", { class: "seccion-cab" }, h("h2", {}, "Tablero"), h("button", { class: "btn", onclick: () => editarPub() }, "➕ Publicar")),
+    (data || []).length ? h("div", { class: "grid" }, data.map(p => h("article", { class: "tarjeta" + (p.fijado ? " fijada" : "") },
+      h("div", { class: "meta" }, p.fijado ? h("span", { class: "chip ambar" }, "📌 Fijado") : null, h("span", { class: "chip" }, TIPOS_PUB[p.tipo]),
+        h("span", {}, fecha(p.created_at)), h("span", {}, "Para: " + ([p.continente, nPais(p.pais_id)].filter(Boolean).join(" · ") || "todos"))),
+      h("h3", { style: "margin-top:10px" }, p.titulo), textoRico(p.cuerpo),
+      h("div", { class: "acciones" },
+        h("button", { class: "btn sec peq", onclick: () => seguimiento("lectura", p.id, p.titulo) }, "👀 Quién lo leyó"),
+        h("button", { class: "btn sec peq", onclick: () => copiar(`📌 ${p.titulo}\nYa está en el tablero de Avancemos Internacional. Léelo y márcalo como leído:\n${URL_APP}#tablero`) }, "📋 Aviso para WhatsApp"),
+        h("button", { class: "btn sec peq", onclick: () => editarPub(p) }, "✏️ Editar"),
+        h("button", { class: "btn sec peq", onclick: async () => { await sb.from("int_publicaciones").update({ fijado: !p.fijado }).eq("id", p.id); tablero(); } }, p.fijado ? "Desfijar" : "📌 Fijar"),
+        h("button", { class: "btn-icono", title: "Eliminar", onclick: async () => {
+          if (!confirm("¿Eliminar esta publicación?")) return;
+          const { error } = await sb.from("int_publicaciones").delete().eq("id", p.id);
+          error ? aviso(errMsg(error), "error") : tablero();
+        } }, "🗑")))))
+    : h("p", { class: "vacio" }, "Aún no hay publicaciones. Publica el primer anuncio o acuerdo."));
+}
+
+function editarPub(p = {}) {
+  const tipo = h("select", {}, Object.entries(TIPOS_PUB).map(([k, v]) => h("option", { value: k, selected: k === (p.tipo || "anuncio") }, v)));
+  const titulo = h("input", { maxlength: 160, value: p.titulo || "" });
+  const cuerpo = h("textarea", { maxlength: 8000 }); cuerpo.value = p.cuerpo || "";
+  const enlace = h("input", { type: "url", placeholder: "https://…", value: p.enlace || "" });
+  const vence = h("input", { type: "datetime-local", value: aLocal(p.vence_en) });
+  const fijado = h("input", { type: "checkbox", checked: !!p.fijado });
+  const aud = audiencia(p.continente, p.pais_id);
+  const guardar = h("button", { class: "btn", onclick: async () => {
+    if (titulo.value.trim().length < 3) return aviso("Escribe un título.", "error");
+    if (enlace.value && !/^https:\/\//.test(enlace.value)) return aviso("El enlace debe empezar por https://", "error");
+    const fila = { tipo: tipo.value, titulo: titulo.value.trim(), cuerpo: cuerpo.value, enlace: enlace.value || null, vence_en: aISO(vence.value), fijado: fijado.checked, ...aud.val() };
+    guardar.disabled = true;
+    const { error } = p.id ? await sb.from("int_publicaciones").update(fila).eq("id", p.id) : await sb.from("int_publicaciones").insert({ ...fila, autor_id: s.user.id });
+    guardar.disabled = false;
+    if (error) return aviso(errMsg(error), "error");
+    cerrar(); aviso("Publicado."); ir("tablero");
+  } }, p.id ? "Guardar" : "Publicar");
+  const cerrar = modal(p.id ? "Editar publicación" : "Nueva publicación", [
+    h("label", {}, "Tipo"), tipo, h("label", {}, "Título"), titulo, h("label", {}, "Contenido"), cuerpo,
+    h("p", { class: "ayuda" }, "Los enlaces https:// se vuelven clicables."),
+    h("div", { class: "fila" }, h("div", {}, h("label", {}, "Enlace (opcional)"), enlace), h("div", {}, h("label", {}, "Fecha límite (tareas)"), vence)),
+    aud.el, h("label", { class: "check" }, fijado, "📌 Fijar arriba del tablero")], [guardar]);
+}
+
+// =============== Votaciones ===============
+async function votaciones() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const { data } = await sb.from("int_encuestas").select("*").order("created_at", { ascending: false });
+  const enc = data || [];
+  vaciar(V, h("div", { class: "seccion-cab" }, h("h2", {}, "Votaciones y encuestas"), h("button", { class: "btn ambar", onclick: () => editarEnc() }, "🗳️ Nueva")),
+    enc.length ? h("div", { class: "grid grid-2" }, enc.map(e => tarjetaVoto(e, null, { soloResultados: true, extra: h("div", { class: "acciones" },
+      h("button", { class: "btn sec peq", onclick: () => seguimiento("voto", e.id, e.titulo) }, "👥 Quién votó"),
+      h("button", { class: "btn sec peq", onclick: () => copiar(`🗳️ ${e.titulo}\nVota aquí antes de ${e.cierra_en ? fecha(e.cierra_en) : "que cierre"}:\n${URL_APP}#votaciones`) }, "📋 Aviso para WhatsApp"),
+      abierta(e) ? h("button", { class: "btn sec peq", onclick: async () => { await sb.from("int_encuestas").update({ cerrada: true }).eq("id", e.id); votaciones(); } }, "🔒 Cerrar ya")
+        : h("button", { class: "btn sec peq", onclick: async () => { await sb.from("int_encuestas").update({ cerrada: false, cierra_en: null }).eq("id", e.id); votaciones(); } }, "🔓 Reabrir"),
+      h("button", { class: "btn-icono", title: "Eliminar", onclick: async () => {
+        if (!confirm("¿Eliminar esta votación y todos sus votos?")) return;
+        const { error } = await sb.from("int_encuestas").delete().eq("id", e.id); error ? aviso(errMsg(error), "error") : votaciones();
+      } }, "🗑")) })))
+    : h("p", { class: "vacio" }, "Aún no hay votaciones."));
+}
+
+function editarEnc() {
+  const tipo = h("select", {}, h("option", { value: "votacion" }, "Votación (una sola opción)"), h("option", { value: "encuesta" }, "Encuesta (varias opciones)"));
+  const titulo = h("input", { maxlength: 200, placeholder: "¿Qué se vota?" });
+  const desc = h("textarea", { maxlength: 4000, placeholder: "Contexto para votar informado (opcional)", style: "min-height:80px" });
+  const ops = h("div");
+  const addOp = (v = "") => ops.append(h("div", { style: "display:flex;gap:6px;margin:6px 0" }, h("input", { maxlength: 200, value: v, placeholder: "Opción" }),
+    h("button", { type: "button", class: "btn-icono", onclick: (e) => e.target.parentElement.remove() }, "✕")));
+  ["A favor", "En contra", "Me abstengo"].forEach(addOp);
+  const cierra = h("input", { type: "datetime-local" });
+  const res = h("select", {}, h("option", { value: "al_votar" }, "Después de votar"), h("option", { value: "al_cerrar" }, "Solo al cerrar"), h("option", { value: "siempre" }, "Siempre"));
+  const coment = h("input", { type: "checkbox" });
+  const aud = audiencia();
+  const guardar = h("button", { class: "btn ambar", onclick: async () => {
+    const opciones = [...ops.querySelectorAll("input")].map(i => i.value.trim()).filter(Boolean);
+    if (titulo.value.trim().length < 3) return aviso("Escribe la pregunta.", "error");
+    if (opciones.length < 2) return aviso("Necesitas al menos 2 opciones.", "error");
+    guardar.disabled = true;
+    const { error } = await sb.from("int_encuestas").insert({ tipo: tipo.value, titulo: titulo.value.trim(), descripcion: desc.value, opciones,
+      cierra_en: aISO(cierra.value), resultados: res.value, permite_comentario: coment.checked, autor_id: s.user.id, ...aud.val() });
+    guardar.disabled = false;
+    if (error) return aviso(errMsg(error), "error");
+    cerrar(); aviso("Votación creada."); ir("votaciones");
+  } }, "Crear votación");
+  const cerrar = modal("Nueva votación", [h("label", {}, "Tipo"), tipo, h("label", {}, "Pregunta"), titulo, h("label", {}, "Descripción"), desc,
+    h("label", {}, "Opciones"), ops, h("button", { type: "button", class: "btn sec peq", onclick: () => addOp() }, "+ Opción"),
+    h("div", { class: "fila" }, h("div", {}, h("label", {}, "Cierra el"), cierra), h("div", {}, h("label", {}, "Mostrar resultados"), res)),
+    aud.el, h("label", { class: "check" }, coment, "Permitir comentario con el voto")], [guardar]);
+}
+
+// Quién leyó / votó, con lista de pendientes para recordarles por WhatsApp
+async function seguimiento(tipo, id, titulo) {
+  const { data, error } = await sb.rpc("int_seguimiento", { p_tipo: tipo, p_id: id });
+  if (error) return aviso(errMsg(error), "error");
+  const si = data.filter(x => x.hecho), no = data.filter(x => !x.hecho);
+  const verbo = tipo === "lectura" ? "leído" : "votado";
+  modal(titulo, [
+    h("div", { class: "stats" }, h("div", { class: "stat" }, h("b", {}, si.length), h("span", {}, `han ${verbo}`)), h("div", { class: "stat" }, h("b", {}, no.length), h("span", {}, `no han ${verbo}`))),
+    h("h3", {}, `Faltan (${no.length})`),
+    no.length ? h("ul", {}, no.map(x => h("li", {}, x.nombre, " · ", x.pais, " ", x.telefono ? h("a", { href: "https://wa.me/" + x.telefono.replace(/\D/g, "") + "?text=" + encodeURIComponent(`Hola ${x.nombre.split(" ")[0]}, te falta ${tipo === "lectura" ? "leer" : "votar"}: "${titulo}" → ${URL_APP}`), target: "_blank", rel: "noopener" }, "💬 recordar") : null)))
+      : h("p", { class: "ayuda" }, "¡Todos al día!"),
+    h("details", {}, h("summary", {}, `Ya ${verbo} (${si.length})`), h("ul", {}, si.map(x => h("li", {}, x.nombre + " · " + x.pais))))]);
+}
+
+// =============== Organigrama ===============
+async function organigrama() {
+  vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
+  const [{ data: info }, { data: mbs }] = await Promise.all([sb.rpc("int_organigrama"), sb.from("int_miembros").select("user_id, nombre, pais_id").eq("estado", "activo").order("nombre")]);
+  const cArbol = h("div");
+  vaciar(V, h("div", { class: "seccion-cab" }, h("h2", {}, "Organigrama"),
+      h("div", { class: "acciones", style: "margin:0" },
+        !info.cargos.length ? h("button", { class: "btn sec", onclick: () => plantilla() }, "✨ Crear estructura base") : null,
+        h("button", { class: "btn", onclick: () => editarCargo({}, info.cargos, mbs) }, "➕ Cargo"))),
+    h("p", { class: "ayuda" }, "Toca un cargo para editarlo o asignar a la persona."), cArbol);
+  arbol(cArbol, info.cargos, { alClic: (c) => editarCargo(c, info.cargos, mbs) });
+}
+
+async function plantilla() {
+  const { data: raiz, error } = await sb.from("int_cargos").insert({ titulo: "Coordinación Internacional", nivel: "global", orden: 0 }).select().single();
+  if (error) return aviso(errMsg(error), "error");
+  await sb.from("int_cargos").insert(CONTINENTES.map((c, i) => ({ titulo: "Coordinación " + c, nivel: "continente", continente: c, padre_id: raiz.id, orden: i + 1 })));
+  aviso("Estructura creada: global y 7 continentes."); organigrama();
+}
+
+function editarCargo(c, cargos, mbs) {
+  const titulo = h("input", { maxlength: 100, value: c.titulo || "", placeholder: "Ej.: Coordinador España" });
+  const nivel = h("select", {}, Object.entries(NIVELES).map(([k, v]) => h("option", { value: k, selected: k === (c.nivel || "pais") }, v)));
+  const cont = h("select", {}, h("option", { value: "" }, "—"), CONTINENTES.map(x => h("option", { value: x, selected: x === c.continente }, x)));
+  const pais = h("select", {}, h("option", { value: "" }, "—"), PS.map(p => h("option", { value: p.id, selected: p.id === c.pais_id }, p.n)));
+  const ciudad = h("input", { maxlength: 80, value: c.ciudad || "" });
+  const sector = h("input", { maxlength: 80, value: c.sector || "", placeholder: "Ej.: Comunicaciones" });
+  const padre = h("select", {}, h("option", { value: "" }, "— Ninguno (raíz) —"), cargos.filter(x => x.id !== c.id).map(x => h("option", { value: x.id, selected: x.id === c.padre_id }, x.titulo)));
+  const persona = h("select", {}, h("option", { value: "" }, "— Vacante —"), (mbs || []).map(m => h("option", { value: m.user_id, selected: m.user_id === c.user_id }, `${m.nombre} (${nPais(m.pais_id)})`)));
+  const orden = h("input", { type: "number", value: c.orden ?? 0, style: "max-width:120px" });
+  pais.onchange = () => { const p = PS.find(x => x.id === pais.value); if (p) cont.value = p.c; };
+  const guardar = h("button", { class: "btn", onclick: async () => {
+    if (titulo.value.trim().length < 2) return aviso("Escribe el nombre del cargo.", "error");
+    const fila = { titulo: titulo.value.trim(), nivel: nivel.value, continente: cont.value || null, pais_id: pais.value || null, ciudad: ciudad.value.trim() || null,
+      sector: sector.value.trim() || null, padre_id: padre.value || null, user_id: persona.value || null, orden: +orden.value || 0 };
+    const { error } = c.id ? await sb.from("int_cargos").update(fila).eq("id", c.id) : await sb.from("int_cargos").insert(fila);
+    if (error) return aviso(errMsg(error), "error");
+    cerrar(); aviso("Guardado."); organigrama();
+  } }, "Guardar");
+  const borrar = c.id ? h("button", { class: "btn peligro", onclick: async () => {
+    if (!confirm("¿Eliminar este cargo? Los cargos que dependen de él quedan como raíz.")) return;
+    const { error } = await sb.from("int_cargos").delete().eq("id", c.id);
+    if (error) return aviso(errMsg(error), "error");
+    cerrar(); organigrama();
+  } }, "Eliminar") : null;
+  const cerrar = modal(c.id ? "Editar cargo" : "Nuevo cargo", [
+    h("label", {}, "Cargo"), titulo, h("div", { class: "fila" }, h("div", {}, h("label", {}, "Nivel"), nivel), h("div", {}, h("label", {}, "Depende de"), padre)),
+    h("div", { class: "fila" }, h("div", {}, h("label", {}, "Continente"), cont), h("div", {}, h("label", {}, "País"), pais)),
+    h("div", { class: "fila" }, h("div", {}, h("label", {}, "Ciudad"), ciudad), h("div", {}, h("label", {}, "Sector"), sector)),
+    h("label", {}, "Persona asignada"), persona, h("p", { class: "ayuda" }, "Solo aparecen miembros aprobados."),
+    h("label", {}, "Orden"), orden], [borrar, guardar]);
+}
+</script>
+</body>
+</html>

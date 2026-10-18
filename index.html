@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Avancemos Internacional</title>
+  <meta name="description" content="Red de colombianos de centro en el exterior: anuncios, acuerdos, votaciones y organigrama en un solo lugar.">
+  <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+  <header class="barra"><div class="barra-in">
+    <a class="marca" href="index.html"><img src="icono.svg" alt=""><span>avancemos<small>Internacional</small></span></a>
+    <span class="esp"></span>
+    <a class="btn sec peq" style="color:#fff;border-color:rgba(255,255,255,.3)" href="https://avancemoscol.github.io" target="_blank" rel="noopener">Sitio principal</a>
+  </div></header>
+
+  <section class="hero"><div class="hero-in">
+    <div>
+      <h1>Colombianos en el exterior, <em>organizados</em>.</h1>
+      <p>Lo importante ya no se pierde entre cientos de mensajes del grupo de WhatsApp. Aquí quedan los anuncios, los acuerdos y las votaciones, y cada quien ve lo que le falta por leer o votar.</p>
+      <ul>
+        <li>📌 <span><b>Tablero</b> con anuncios, acuerdos, actas y tareas que no se pierden.</span></li>
+        <li>🗳️ <span><b>Votaciones y encuestas</b>: un voto por persona, con resultados claros.</span></li>
+        <li>🌎 <span><b>Organigrama y mapa</b>: quién coordina cada continente, país, ciudad o sector.</span></li>
+      </ul>
+    </div>
+
+    <div class="tarjeta acceso">
+      <div class="seg" role="group" aria-label="Acceso">
+        <button id="b-ing" aria-pressed="true">Iniciar sesión</button>
+        <button id="b-reg" aria-pressed="false">Registrarme</button>
+      </div>
+
+      <form id="f-ing">
+        <label for="i-correo">Correo</label>
+        <input id="i-correo" type="email" autocomplete="email" required>
+        <label for="i-clave">Contraseña</label>
+        <input id="i-clave" type="password" autocomplete="current-password" required minlength="8">
+        <div class="acciones"><button class="btn" style="width:100%">Entrar</button></div>
+        <p class="ayuda">¿Ya tienes cuenta en Avancemos? Entra con el mismo correo y contraseña.</p>
+        <p class="ayuda"><a href="#" id="olvide">Olvidé mi contraseña</a></p>
+      </form>
+
+      <form id="f-reg" hidden>
+        <label for="r-nombre">Nombre completo</label>
+        <input id="r-nombre" required minlength="2" maxlength="120" autocomplete="name">
+        <div class="fila">
+          <div><label for="r-pais">País donde vives</label><select id="r-pais" required></select></div>
+          <div><label for="r-ciudad">Ciudad</label><input id="r-ciudad" maxlength="80" autocomplete="address-level2"></div>
+        </div>
+        <div class="fila">
+          <div><label for="r-tel">WhatsApp (con indicativo)</label><input id="r-tel" type="tel" maxlength="30" placeholder="+34 600 000 000" autocomplete="tel"></div>
+          <div><label for="r-sector">Sector en que apoyas</label>
+            <select id="r-sector"><option value="">— Opcional —</option><option>Comunicaciones</option><option>Logística y eventos</option><option>Diseño y audiovisual</option><option>Tecnología</option><option>Políticas públicas</option><option>Jurídico</option><option>Formación</option><option>Finanzas</option><option>Voluntariado</option></select></div>
+        </div>
+        <label for="r-correo">Correo</label>
+        <input id="r-correo" type="email" required autocomplete="email">
+        <label for="r-clave">Contraseña (mín. 8)</label>
+        <input id="r-clave" type="password" required minlength="8" autocomplete="new-password">
+        <label class="check"><input type="checkbox" id="r-ok" required> Autorizo el tratamiento de mis datos según la <a href="https://avancemoscol.github.io/privacidad.html" target="_blank" rel="noopener">política de privacidad</a>.</label>
+        <div class="acciones"><button class="btn" style="width:100%">Crear cuenta</button></div>
+        <p class="ayuda">Un coordinador revisará y aprobará tu ingreso.</p>
+      </form>
+    </div>
+  </div></section>
+
+  <footer>Avancemos · Ni extremos ni excusas: soluciones.</footer>
+
+<script type="module">
+import { sb, $, aviso, errMsg, selectorPais } from "./js/comun.js";
+
+const { data: { session } } = await sb.auth.getSession();
+if (session) location.replace("app.html");
+
+const fIng = $("#f-ing"), fReg = $("#f-reg");
+const modo = (reg) => { fIng.hidden = reg; fReg.hidden = !reg; $("#b-ing").setAttribute("aria-pressed", !reg); $("#b-reg").setAttribute("aria-pressed", reg); };
+$("#b-ing").onclick = () => modo(false);
+$("#b-reg").onclick = () => modo(true);
+if (location.hash === "#registro") modo(true);
+selectorPais($("#r-pais"));
+
+fIng.onsubmit = async (e) => {
+  e.preventDefault();
+  const b = fIng.querySelector("button"); b.disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("#i-correo").value.trim(), password: $("#i-clave").value });
+  b.disabled = false;
+  if (error) return aviso(error.message.includes("Invalid") ? "Correo o contraseña incorrectos." : errMsg(error), "error");
+  location.href = "app.html";
+};
+
+fReg.onsubmit = async (e) => {
+  e.preventDefault();
+  const b = fReg.querySelector("button"); b.disabled = true;
+  const meta = {
+    origen: "internacional", nombre: $("#r-nombre").value.trim(), departamento_id: "EX", municipio_id: $("#r-pais").value,
+    ciudad: $("#r-ciudad").value.trim(), telefono: $("#r-tel").value.trim(), sector: $("#r-sector").value
+  };
+  const { data, error } = await sb.auth.signUp({ email: $("#r-correo").value.trim(), password: $("#r-clave").value, options: { data: meta } });
+  b.disabled = false;
+  if (error) return aviso(error.message.includes("registered") ? "Ese correo ya tiene cuenta: inicia sesión." : errMsg(error), "error");
+  if (data.session) location.href = "app.html";
+  else { aviso("Cuenta creada. Revisa tu correo para confirmarla y luego inicia sesión."); modo(false); }
+};
+
+$("#olvide").onclick = async (e) => {
+  e.preventDefault();
+  const correo = $("#i-correo").value.trim();
+  if (!correo) return aviso("Escribe tu correo arriba y vuelve a tocar el enlace.", "error");
+  const { error } = await sb.auth.resetPasswordForEmail(correo, { redirectTo: "https://avancemoscol.github.io/restablecer.html" });
+  aviso(error ? errMsg(error) : "Te enviamos un correo para restablecer la contraseña.", error ? "error" : "ok");
+};
+</script>
+</body>
+</html>
