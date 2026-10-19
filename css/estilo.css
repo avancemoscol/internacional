@@ -146,3 +146,20 @@ textarea { min-height: 110px; resize: vertical; }
 .aviso-caja { border-radius: 12px; padding: 14px 16px; background: var(--alerta-fondo); color: var(--alerta); font-weight: 600; }
 footer { text-align: center; color: var(--texto-suave); font-size: 13px; padding: 24px 16px 40px; }
 @media (max-width: 600px) { .barra .usuario { display: none; } main { padding-top: 16px; } }
+/* Agenda */
+.agenda { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 20px; align-items: start; }
+@media (max-width: 760px) { .agenda { grid-template-columns: 1fr; } }
+.cal { background: var(--superficie); border: 1px solid var(--borde-suave); border-radius: 14px; padding: 12px; }
+.cal-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; text-transform: capitalize; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; }
+.cal-grid > span { font-size: 12px; color: var(--texto-suave); font-weight: 700; }
+.dia { position: relative; aspect-ratio: 1; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.dia:hover { background: var(--borde-suave); }
+.dia.con { font-weight: 800; color: var(--turquesa); background: var(--exito-fondo); }
+.dia.hoy { outline: 2px solid var(--ambar); }
+.dia.sel { background: var(--turquesa); color: #fff; }
+.dia i { position: absolute; top: 2px; right: 4px; font-size: 10px; font-style: normal; }
+.tarjeta.hecho { opacity: .9; border-left: 4px solid var(--exito); }
+.enlaces { display: grid; gap: 12px; }
+.enlace { display: inline-flex; align-items: center; gap: 2px; background: var(--superficie); border: 1px solid var(--borde-suave); border-radius: 999px; padding: 4px 6px 4px 14px; font-weight: 600; }
+.enlace a { text-decoration: none; }

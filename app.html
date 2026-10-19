@@ -20,9 +20,11 @@
     </div>
     <nav class="tabs" id="tabs" role="tablist" hidden>
       <button data-v="inicio" aria-selected="true">Inicio</button>
+      <button data-v="agenda">📅 Agenda</button>
       <button data-v="tablero">Tablero <span class="badge" id="n-leer" hidden></span></button>
       <button data-v="votaciones">Votaciones <span class="badge" id="n-votar" hidden></span></button>
-      <button data-v="organigrama">Organigrama y mapa</button>
+      <button data-v="formularios">Formularios</button>
+      <button data-v="organigrama">Red y mapa</button>
       <button data-v="perfil">Mi perfil</button>
     </nav>
   </header>
@@ -32,9 +34,15 @@
 import { sb, h, $, vaciar, aviso, errMsg, fecha, sesion, salir, selectorPais, nombrePais, textoRico, TIPOS_PUB, paises } from "./js/comun.js";
 import { tarjeta as tarjetaVoto, abierta } from "./js/votacion.js";
 import { arbol, mapa, resumenContinentes } from "./js/org.js";
+import { agenda as vAgenda, TIPOS_EV } from "./js/agenda.js";
+import { formularios as vForm } from "./js/formularios.js";
+const agenda = () => vAgenda(V, s), formularios = () => vForm(V, s);
+const nuevo = (texto, hash) => COORD ? h("a", { class: "btn ambar", href: "admin.html#" + hash }, texto) : null;
 
 const s = await sesion();
 const V = $("#vista");
+const COORD = ["coordinador", "admin"].includes(s?.rol);
+
 $("#salir").onclick = salir;
 $("#usuario").textContent = s.miembro?.nombre || s.user.email;
 
@@ -72,7 +80,7 @@ if (!s.miembro && !s.rol) {
 async function iniciar() {
   $("#tabs").hidden = false;
   if (["coordinador", "admin"].includes(s.rol)) $("#ir-admin").hidden = false;
-  const vistas = { inicio, tablero, votaciones, organigrama, perfil };
+  const vistas = { inicio, agenda, tablero, votaciones, formularios, organigrama, perfil };
   const ir = (v) => {
     document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.v === v));
     history.replaceState(null, "", "#" + v);
@@ -130,15 +138,27 @@ function tarjetaPub(p, alLeer) {
 // ---------- Vistas ----------
 async function inicio() {
   vaciar(V, h("p", { class: "vacio" }, "Cargando…"));
-  const [pubs, { enc, M }, pend] = await Promise.all([cargarPubs(), cargarEnc(), contadores()]);
+  const [pubs, { enc, M }, pend, { data: prox }, { data: forms }, { data: resp }] = await Promise.all([cargarPubs(), cargarEnc(), contadores(),
+    sb.from("int_eventos").select("*").gte("inicio", new Date(Date.now() - 3 * 3600e3).toISOString()).order("inicio").limit(4),
+    sb.from("int_formularios").select("id, titulo, cierra_en, cerrado"), sb.from("int_respuestas").select("formulario_id").eq("user_id", s.user.id)]);
+  const R = new Set((resp || []).map(x => x.formulario_id));
+  const porLlenar = (forms || []).filter(f => !f.cerrado && (!f.cierra_en || new Date(f.cierra_en) > new Date()) && !R.has(f.id));
+  const ir = (v) => document.querySelector(`#tabs button[data-v="${v}"]`).click();
   const noLeidas = pubs.filter(p => !p.leida), porVotar = enc.filter(e => abierta(e) && !M[e.id]);
   vaciar(V,
     h("h1", {}, `Hola, ${s.miembro?.nombre?.split(" ")[0] || ""} 👋`),
     h("div", { class: "stats" },
       h("div", { class: "stat" }, h("b", {}, pend?.por_leer ?? 0), h("span", {}, "por leer en el tablero")),
       h("div", { class: "stat" }, h("b", {}, pend?.por_votar ?? 0), h("span", {}, "votaciones pendientes")),
-      h("div", { class: "stat" }, h("b", {}, await nombrePais(s.miembro?.pais_id) || "—"), h("span", {}, s.miembro?.ciudad || "tu país"))),
-    porVotar.length ? [h("h2", {}, "🗳️ Te falta votar")] : null,
+      h("div", { class: "stat", style: "cursor:pointer", onclick: () => ir("formularios") }, h("b", {}, porLlenar.length), h("span", {}, "formularios por llenar"))),
+    COORD ? h("div", { class: "acciones", style: "margin-bottom:18px" },
+      h("a", { class: "btn ambar peq", href: "admin.html#tablero" }, "＋ Publicar"), h("a", { class: "btn ambar peq", href: "admin.html#votaciones" }, "＋ Votación"),
+      h("button", { class: "btn ambar peq", onclick: () => ir("agenda") }, "＋ Agenda"), h("button", { class: "btn ambar peq", onclick: () => ir("formularios") }, "＋ Formulario")) : null,
+    (prox || []).length ? [h("h2", {}, "📅 Próximo"), h("div", { class: "grid grid-2" }, prox.map(e => h("article", { class: "tarjeta", style: "cursor:pointer", onclick: () => ir("agenda") },
+      h("div", { class: "meta" }, h("span", { class: "chip" }, TIPOS_EV[e.tipo]), h("b", {}, fecha(e.inicio))), h("h3", { style: "margin-top:6px" }, e.titulo),
+      e.lugar ? h("p", { class: "ayuda" }, "📍 " + e.lugar) : null)))] : null,
+    porLlenar.length ? [h("h2", { style: "margin-top:24px" }, "📝 Formularios por llenar"), h("div", { class: "acciones" }, porLlenar.map(f => h("button", { class: "btn sec", onclick: () => ir("formularios") }, f.titulo)))] : null,
+    porVotar.length ? [h("h2", { style: "margin-top:24px" }, "🗳️ Te falta votar")] : null,
     h("div", { class: "grid grid-2" }, porVotar.slice(0, 4).map(e => tarjetaVoto(e, null, { alVotar: inicio }))),
     h("h2", { style: "margin-top:28px" }, noLeidas.length ? "📌 Lo que no has leído" : "✅ Estás al día"),
     noLeidas.length ? h("div", { class: "grid" }, noLeidas.slice(0, 10).map(p => tarjetaPub(p, inicio)))
@@ -157,7 +177,7 @@ async function tablero() {
   const sel = h("select", { style: "width:auto", onchange: (e) => { filtro = e.target.value; pintar(); } },
     h("option", { value: "todos" }, "Todo"), h("option", { value: "noleidos" }, "No leídos"),
     Object.entries(TIPOS_PUB).map(([k, v]) => h("option", { value: k }, v)));
-  vaciar(V, h("div", { class: "seccion-cab" }, h("h2", {}, "Tablero"), sel), lista);
+  vaciar(V, h("div", { class: "seccion-cab" }, h("h2", {}, "Tablero"), h("div", { class: "acciones" }, sel, nuevo("＋ Publicar", "tablero"))), lista);
   pintar();
 }
 
@@ -166,7 +186,7 @@ async function votaciones() {
   const { enc, M } = await cargarEnc();
   const ab = enc.filter(abierta), ce = enc.filter(e => !abierta(e));
   vaciar(V,
-    h("h2", {}, "Votaciones abiertas"),
+    h("div", { class: "seccion-cab" }, h("h2", {}, "Votaciones abiertas"), nuevo("＋ Nueva votación", "votaciones")),
     ab.length ? h("div", { class: "grid grid-2" }, ab.map(e => tarjetaVoto(e, M[e.id], { alVotar: () => { votaciones(); contadores(); } })))
       : h("p", { class: "vacio" }, "No hay votaciones abiertas en este momento."),
     ce.length ? [h("h2", { style: "margin-top:28px" }, "Cerradas"), h("div", { class: "grid grid-2" }, ce.map(e => tarjetaVoto(e, M[e.id])))] : null);
